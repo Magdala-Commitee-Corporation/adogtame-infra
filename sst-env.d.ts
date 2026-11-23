@@ -6,6 +6,14 @@
 
 declare module "sst" {
   export interface Resource {
+    "AuthEvents": {
+      "arn": string
+      "type": "sst.aws.SnsTopic"
+    }
+    "DogsEvents": {
+      "arn": string
+      "type": "sst.aws.SnsTopic"
+    }
     "Edge": {
       "type": "sst.aws.Router"
       "url": string
@@ -13,6 +21,10 @@ declare module "sst" {
     "Photos": {
       "name": string
       "type": "sst.aws.Bucket"
+    }
+    "RequestsEvents": {
+      "arn": string
+      "type": "sst.aws.SnsTopic"
     }
   }
 }
