@@ -12,6 +12,10 @@
  *   microservice owns its queues and subscribes to these topics.
  * - `/api/<service>` routes to each microservice HTTP API, so the web app
  *   and the API share the same domain (HttpOnly session cookie).
+ * - One Aurora Serverless v2 PostgreSQL cluster (ADO-14) that holds one
+ *   database per service (`auth`, `dogs`). It scales to 0 ACU and pauses
+ *   after 5 minutes without connections, so it only costs storage while idle.
+ *   Functions reach it through the Data API, so none of them runs in a VPC.
  */
 
 const ROOT_DOMAIN = "vieerr.xyz";
@@ -21,6 +25,12 @@ const PUBLISHERS = ["Auth", "Dogs", "Requests"] as const;
 // WAF costs about USD 9/month. Disabled until the project review needs it.
 // Set to true to enable it on the `prod` stage (RNF-23).
 const ENABLE_WAF = false;
+
+// Stages that have the Aurora cluster. `prod` is added when it is needed
+// (adog_ARCH.md §3.6). Removing a stage from this list deletes its cluster;
+// it can be recreated with `sst deploy`, `npm run db:bootstrap` and the
+// migrations of each service.
+const DATABASE_STAGES = ["dev"];
 
 export default $config({
   app(input) {
@@ -97,11 +107,56 @@ export default $config({
       topics[`${publisher.toLowerCase()}EventsTopic`] = topic.arn;
     }
 
+    const database = DATABASE_STAGES.includes($app.stage) ? createDatabase() : undefined;
+
     return {
       ...topics,
+      ...(database ? { databaseClusterArn: database.clusterArn, databaseSecretArn: database.secretArn } : {}),
       url: router.url,
       distributionId: router.distributionID,
       photosBucket: photos.name,
     };
+
+    function createDatabase() {
+      // The account default VPC avoids the Cloud Map private zone that
+      // sst.aws.Vpc creates (USD 0.50/month). The security group has no
+      // inbound rules and the instance is not public: only the Data API
+      // reaches the database.
+      const subnets = aws.ec2.getSubnetsOutput({
+        filters: [{ name: "default-for-az", values: ["true"] }],
+      });
+      const defaultVpc = aws.ec2.getVpcOutput({ default: true });
+      const securityGroup = new aws.ec2.SecurityGroup("DatabaseSecurityGroup", {
+        description: "Adogtame Aurora cluster, Data API only",
+        vpcId: defaultVpc.id,
+      });
+
+      const db = new sst.aws.Aurora("Database", {
+        engine: "postgres",
+        database: "adogtame",
+        dataApi: true,
+        scaling: { min: "0 ACU", max: "2 ACU", pauseAfter: "5 minutes" },
+        vpc: { subnets: subnets.ids, securityGroups: [securityGroup.id] },
+      });
+
+      // Services read these to link the cluster (sst.aws.Aurora.get) and to
+      // call the Data API with the master secret (one secret, adog_ARCH.md §3.6).
+      new aws.ssm.Parameter("DatabaseClusterId", {
+        name: `/adogtame/${$app.stage}/db/cluster-id`,
+        type: "String",
+        value: db.id,
+      });
+      new aws.ssm.Parameter("DatabaseClusterArn", {
+        name: `/adogtame/${$app.stage}/db/cluster-arn`,
+        type: "String",
+        value: db.clusterArn,
+      });
+      new aws.ssm.Parameter("DatabaseSecretArn", {
+        name: `/adogtame/${$app.stage}/db/secret-arn`,
+        type: "String",
+        value: db.secretArn,
+      });
+      return db;
+    }
   },
 });

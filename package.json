@@ -3,16 +3,21 @@
   "version": "1.0.0",
   "scripts": {
     "deploy:dev": "sst deploy --stage dev",
-    "deploy:prod": "sst deploy --stage prod"
+    "deploy:prod": "sst deploy --stage prod",
+    "db:bootstrap": "AWS_PROFILE=bier-personal tsx scripts/db-bootstrap.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@aws-sdk/client-rds-data": "^3.1176.0",
+    "@aws-sdk/client-ssm": "^3.1176.0",
     "@types/aws-lambda": "^8.10.164",
     "@types/node": "^26.6.6",
     "sst": "^4.17.2",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
-  }
+  },
+  "type": "module"
 }
